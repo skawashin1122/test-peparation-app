@@ -97,6 +97,7 @@ def reset_quiz_session_state(questions: list[Question]) -> None:
     st.session_state["streak"] = 0
     st.session_state["max_streak"] = 0
     st.session_state["answers"] = {}
+    st.session_state["judged_answers"] = {}
 
 
 def initialize_quiz_session_state(questions: list[Question]) -> None:
@@ -123,7 +124,7 @@ def initialize_quiz_session_state(questions: list[Question]) -> None:
     answers = st.session_state.get("answers")
     if not isinstance(answers, dict):
         st.session_state["answers"] = {}
-        return
+        answers = {}
 
     valid_question_ids = {question["id"] for question in questions}
     normalized_answers: dict[str, str] = {}
@@ -133,6 +134,19 @@ def initialize_quiz_session_state(questions: list[Question]) -> None:
         if question_id in valid_question_ids:
             normalized_answers[question_id] = selected_option
     st.session_state["answers"] = normalized_answers
+
+    judged_answers = st.session_state.get("judged_answers")
+    if not isinstance(judged_answers, dict):
+        st.session_state["judged_answers"] = {}
+        return
+
+    normalized_judged_answers: dict[str, bool] = {}
+    for question_id, is_correct in judged_answers.items():
+        if not isinstance(question_id, str) or not isinstance(is_correct, bool):
+            continue
+        if question_id in valid_question_ids:
+            normalized_judged_answers[question_id] = is_correct
+    st.session_state["judged_answers"] = normalized_judged_answers
 
 
 def render_quiz_mode(questions: list[Question]) -> None:
@@ -155,11 +169,15 @@ def render_quiz_mode(questions: list[Question]) -> None:
         return
 
     current_question = questions[quiz_order[current_index]]
+    question_id = current_question["id"]
+    correct_answer = current_question["answer"]
     st.markdown(f"### 第 {current_index + 1} / {len(quiz_order)} 問")
     st.write(current_question["question"])
 
     answers: dict[str, str] = st.session_state["answers"]
-    selected_option = answers.get(current_question["id"])
+    judged_answers: dict[str, bool] = st.session_state["judged_answers"]
+    is_answered = question_id in judged_answers
+    selected_option = answers.get(question_id)
     selected_index = (
         current_question["options"].index(selected_option)
         if selected_option in current_question["options"]
@@ -169,23 +187,53 @@ def render_quiz_mode(questions: list[Question]) -> None:
         "選択肢を選んでください",
         current_question["options"],
         index=selected_index,
+        disabled=is_answered,
         key=f"quiz-option-{current_question['id']}",
     )
-    if selected is not None:
-        answers[current_question["id"]] = selected
+    if selected is not None and not is_answered:
+        answers[question_id] = selected
         st.session_state["answers"] = answers
 
-    previous_col, next_col = st.columns(2)
+    if is_answered:
+        if judged_answers[question_id]:
+            st.success("正解！🎉")
+        else:
+            st.error(f"残念！正解は「{correct_answer}」でした😢")
+        st.caption(f"現在コンボ: {st.session_state['streak']} / 最大コンボ: {st.session_state['max_streak']}")
+
+    previous_col, action_col = st.columns(2)
     with previous_col:
         if st.button("前の問題", disabled=current_index == 0):
             st.session_state["current_index"] = max(0, current_index - 1)
             st.rerun()
 
-    with next_col:
-        next_label = "結果へ進む" if current_index == len(quiz_order) - 1 else "次の問題"
-        if st.button(next_label):
-            st.session_state["current_index"] = current_index + 1
-            st.rerun()
+    with action_col:
+        if not is_answered:
+            if st.button("回答する"):
+                if selected is None:
+                    st.warning("選択肢を選んでから回答してください。")
+                    return
+
+                answers[question_id] = selected
+                st.session_state["answers"] = answers
+                is_correct = selected == correct_answer
+                judged_answers[question_id] = is_correct
+                st.session_state["judged_answers"] = judged_answers
+
+                if is_correct:
+                    st.session_state["score"] += 1
+                    st.session_state["streak"] += 1
+                    st.session_state["max_streak"] = max(
+                        st.session_state["max_streak"], st.session_state["streak"]
+                    )
+                else:
+                    st.session_state["streak"] = 0
+                st.rerun()
+        else:
+            next_label = "結果へ進む" if current_index == len(quiz_order) - 1 else "次の問題へ"
+            if st.button(next_label):
+                st.session_state["current_index"] = current_index + 1
+                st.rerun()
 
 
 def render_add_mode(quiz_data: QuizData) -> None:
