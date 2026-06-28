@@ -66,7 +66,7 @@ PythonのWebフレームワークである **Streamlit** を使用して作成�
 
 ### 2. 必要なライブラリのインストール
 
-    pip install streamlit
+    pip install -r requirements.txt
 
 ### 3. アプリの起動
 
