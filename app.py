@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 from pathlib import Path
 from typing import TypedDict
 
@@ -86,6 +87,54 @@ def get_next_question_id(questions: list[Question]) -> str:
     return str(max(numeric_ids, default=0) + 1)
 
 
+def reset_quiz_session_state(questions: list[Question]) -> None:
+    quiz_order = list(range(len(questions)))
+    random.shuffle(quiz_order)
+
+    st.session_state["quiz_order"] = quiz_order
+    st.session_state["current_index"] = 0
+    st.session_state["score"] = 0
+    st.session_state["streak"] = 0
+    st.session_state["max_streak"] = 0
+    st.session_state["answers"] = {}
+
+
+def initialize_quiz_session_state(questions: list[Question]) -> None:
+    quiz_order = st.session_state.get("quiz_order")
+    is_valid_order = (
+        isinstance(quiz_order, list)
+        and len(quiz_order) == len(questions)
+        and all(isinstance(index, int) for index in quiz_order)
+        and set(quiz_order) == set(range(len(questions)))
+    )
+    if not is_valid_order:
+        reset_quiz_session_state(questions)
+        return
+
+    current_index = st.session_state.get("current_index")
+    if not isinstance(current_index, int) or current_index < 0 or current_index > len(quiz_order):
+        st.session_state["current_index"] = 0
+
+    for key in ("score", "streak", "max_streak"):
+        value = st.session_state.get(key)
+        if not isinstance(value, int) or value < 0:
+            st.session_state[key] = 0
+
+    answers = st.session_state.get("answers")
+    if not isinstance(answers, dict):
+        st.session_state["answers"] = {}
+        return
+
+    valid_question_ids = {question["id"] for question in questions}
+    normalized_answers: dict[str, str] = {}
+    for question_id, selected_option in answers.items():
+        if not isinstance(question_id, str) or not isinstance(selected_option, str):
+            continue
+        if question_id in valid_question_ids:
+            normalized_answers[question_id] = selected_option
+    st.session_state["answers"] = normalized_answers
+
+
 def render_quiz_mode(questions: list[Question]) -> None:
     st.subheader("クイズに挑戦")
     st.caption(f"現在 {len(questions)} 問の問題が登録されています。")
@@ -94,12 +143,49 @@ def render_quiz_mode(questions: list[Question]) -> None:
         st.warning("問題がまだ登録されていません。先に「問題を追加」モードで登録してください。")
         return
 
-    st.info("この画面では登録済み問題を確認できます。クイズの出題ロジックは次の実装で追加しやすい形にしています。")
-    for question in questions:
-        with st.expander(f"No.{question['id']} {question['question']}"):
-            for index, option in enumerate(question["options"], start=1):
-                st.write(f"{index}. {option}")
-            st.caption(f"正解: {question['answer']}")
+    initialize_quiz_session_state(questions)
+    quiz_order: list[int] = st.session_state["quiz_order"]
+    current_index: int = st.session_state["current_index"]
+
+    if current_index >= len(quiz_order):
+        st.success("全問の出題が完了しました。")
+        if st.button("もう一度シャッフルして挑戦する"):
+            reset_quiz_session_state(questions)
+            st.rerun()
+        return
+
+    current_question = questions[quiz_order[current_index]]
+    st.markdown(f"### 第 {current_index + 1} / {len(quiz_order)} 問")
+    st.write(current_question["question"])
+
+    answers: dict[str, str] = st.session_state["answers"]
+    selected_option = answers.get(current_question["id"])
+    selected_index = (
+        current_question["options"].index(selected_option)
+        if selected_option in current_question["options"]
+        else None
+    )
+    selected = st.radio(
+        "選択肢を選んでください",
+        current_question["options"],
+        index=selected_index,
+        key=f"quiz-option-{current_question['id']}",
+    )
+    if selected is not None:
+        answers[current_question["id"]] = selected
+        st.session_state["answers"] = answers
+
+    previous_col, next_col = st.columns(2)
+    with previous_col:
+        if st.button("前の問題", disabled=current_index == 0):
+            st.session_state["current_index"] = max(0, current_index - 1)
+            st.rerun()
+
+    with next_col:
+        next_label = "結果へ進む" if current_index == len(quiz_order) - 1 else "次の問題"
+        if st.button(next_label):
+            st.session_state["current_index"] = current_index + 1
+            st.rerun()
 
 
 def render_add_mode(quiz_data: QuizData) -> None:
