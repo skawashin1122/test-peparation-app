@@ -98,6 +98,7 @@ def reset_quiz_session_state(questions: list[Question]) -> None:
     st.session_state["max_streak"] = 0
     st.session_state["answers"] = {}
     st.session_state["judged_answers"] = {}
+    st.session_state["result_celebrated"] = False
 
 
 def initialize_quiz_session_state(questions: list[Question]) -> None:
@@ -148,6 +149,33 @@ def initialize_quiz_session_state(questions: list[Question]) -> None:
             normalized_judged_answers[question_id] = is_correct
     st.session_state["judged_answers"] = normalized_judged_answers
 
+    result_celebrated = st.session_state.get("result_celebrated")
+    if not isinstance(result_celebrated, bool):
+        st.session_state["result_celebrated"] = False
+
+
+def render_result_screen(questions: list[Question]) -> None:
+    total_questions = len(questions)
+    score: int = st.session_state["score"]
+    max_streak: int = st.session_state["max_streak"]
+    accuracy = round((score / total_questions) * 100)
+
+    st.subheader("結果発表")
+    st.success(f"{total_questions}問中 {score}問 正解！")
+
+    score_col, accuracy_col, combo_col = st.columns(3)
+    score_col.metric("正解数", f"{score} / {total_questions}")
+    accuracy_col.metric("正解率", f"{accuracy}%")
+    combo_col.metric("最大コンボ", f"{max_streak}")
+
+    if accuracy == 100 and not st.session_state["result_celebrated"]:
+        st.balloons()
+        st.session_state["result_celebrated"] = True
+
+    if st.button("もう一度挑戦する"):
+        reset_quiz_session_state(questions)
+        st.rerun()
+
 
 def render_quiz_mode(questions: list[Question]) -> None:
     st.subheader("クイズに挑戦")
@@ -162,10 +190,7 @@ def render_quiz_mode(questions: list[Question]) -> None:
     current_index: int = st.session_state["current_index"]
 
     if current_index >= len(quiz_order):
-        st.success("全問の出題が完了しました。")
-        if st.button("もう一度シャッフルして挑戦する"):
-            reset_quiz_session_state(questions)
-            st.rerun()
+        render_result_screen(questions)
         return
 
     current_question = questions[quiz_order[current_index]]
